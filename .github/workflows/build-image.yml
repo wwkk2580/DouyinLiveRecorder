@@ -44,8 +44,8 @@ jobs:
         file: ./Dockerfile
         push: true
         tags: |
-          wang0517/douyin-live-recorder:${{ github.ref_name }} 
-          wang0517/douyin-live-recorder:latest
+          ihmily/douyin-live-recorder:${{ github.ref_name }} 
+          ihmily/douyin-live-recorder:latest
         platforms: linux/amd64,linux/arm64
         cache-from: type=local,src=/tmp/.buildx-cache
         cache-to: type=local,dest=/tmp/.buildx-cache
