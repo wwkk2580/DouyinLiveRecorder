@@ -1,5 +1,4 @@
 # syntax=docker/dockerfile:1
-
 # 第一阶段：从 tzdata 获取 Asia/Shanghai 时区文件
 FROM alpine:latest AS builder
 RUN apk add --no-cache tzdata
