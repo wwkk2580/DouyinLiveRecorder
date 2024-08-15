@@ -1,10 +1,8 @@
 # syntax=docker/dockerfile:1
 
-# 第一阶段：从 tzdata 获取 Asia/Shanghai 时区文件
 FROM alpine:latest AS builder
 RUN apk add --no-cache tzdata
 
-# 第二阶段：下载并准备代码
 FROM alpine:latest AS code
 COPY --from=builder /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 RUN apk add --no-cache wget unzip && \
@@ -14,17 +12,13 @@ RUN apk add --no-cache wget unzip && \
     rm -f /code/ffmpeg.exe && \
     rm /tmp/code.zip
 
-# 第三阶段：设置应用环境并运行
 FROM python:3.11-alpine AS final
 WORKDIR /app
 COPY --from=code /code .
 
-# 安装必要的包并清理不需要的文件
 RUN apk add --no-cache ffmpeg && \
     pip install --no-cache-dir -r requirements.txt && \
-    # 清理不必要的文件和目录
     rm -rf /var/cache/apk/* /tmp/* /var/tmp/* /usr/share/man /usr/share/doc /usr/share/licenses && \
-    # 清理日志文件
     find /var/log -type f -delete
 
 CMD ["python3", "main.py"]
