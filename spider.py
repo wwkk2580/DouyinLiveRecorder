@@ -4,7 +4,7 @@
 Author: Hmily
 GitHub: https://github.com/ihmily
 Date: 2023-07-15 23:15:00
-Update: 2024-07-22 00:03:00
+Update: 2024-09-01 21:28:33
 Copyright (c) 2023 by Hmily, All Rights Reserved.
 Function: Get live stream data.
 """
@@ -422,6 +422,15 @@ def get_huya_app_stream_url(url: str, proxy_addr: Union[str, None] = None, cooki
     if cookies:
         headers['Cookie'] = cookies
     room_id = url.split('?')[0].rsplit('/', maxsplit=1)[-1]
+
+    if any(char.isalpha() for char in room_id):
+        html_str = get_req(url, proxy_addr=proxy_addr, headers=headers)
+        room_id = re.search('ProfileRoom":(.*?),"sPrivateHost', html_str)
+        if room_id:
+            room_id = room_id.group(1)
+        else:
+            raise Exception('请使用 “https://www.huya.com/+数字房间号” 进行录制')
+
     params = {
         'm': 'Live',
         'do': 'profileRoom',
@@ -654,10 +663,8 @@ def get_xhs_stream_url(url: str, proxy_addr: Union[str, None] = None, cookies: U
 
     if 'xhslink.com' in url:
         url = get_req(url, proxy_addr=proxy_addr, headers=headers, redirect_url=True)
-        appuid = re.search('host_id=(.*?)(?=&|$)', url).group(1)
-    else:
-        appuid = re.search('appuid=(.*?)(?=&|$)', url).group(1)
-    room_id = re.search('/livestream/(.*?)(?=/|\?)', url).group(1)
+
+    room_id = re.search('/livestream/(.*?)(?=/|\?|$)', url).group(1)
     app_api = f'https://www.xiaohongshu.com/api/sns/red/live/app/v1/ecology/outside/share_info?room_id={room_id}'
     # app_api = f'https://www.redelight.cn/api/sns/red/live/app/v1/ecology/outside/share_info?room_id={room_id}'
     json_str = get_req(url=app_api, proxy_addr=proxy_addr, headers=headers)
@@ -671,7 +678,7 @@ def get_xhs_stream_url(url: str, proxy_addr: Union[str, None] = None, cookies: U
 
     # 这个判断不准确，无论是否在直播status都为0,暂无法判断
     if live_status == 0:
-        flv_url = f'http://live-play.xhscdn.com/live/{room_id}.flv?uid={appuid}'
+        flv_url = f'http://live-play.xhscdn.com/live/{room_id}.flv'
         result['flv_url'] = flv_url
         result['is_live'] = True
         result['record_url'] = flv_url
@@ -1038,6 +1045,7 @@ def get_qiandurebo_stream_data(url: str, proxy_addr: Union[str, None] = None, co
 def get_pandatv_stream_data(url: str, proxy_addr: Union[str, None] = None, cookies: Union[str, None] = None) -> \
         Dict[str, Any]:
     headers = {
+        'origin': 'https://www.pandalive.co.kr',
         'referer': 'https://www.pandalive.co.kr/',
         'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.58',
     }
