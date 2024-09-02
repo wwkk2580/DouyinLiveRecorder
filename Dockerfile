@@ -1,25 +1,23 @@
-# syntax=docker/dockerfile:1
+# 使用更小的 Python 镜像
+FROM python:3.11-slim-bullseye
 
-FROM alpine:latest AS builder
-RUN apk add --no-cache tzdata
-
-FROM alpine:latest AS code
-COPY --from=builder /usr/share/zoneinfo/Asia/Shanghai /usr/share/zoneinfo/Asia/Shanghai
-RUN ln -fs /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
-    apk add --no-cache wget unzip && \
-    wget -O /tmp/code.zip https://github.com/ihmily/DouyinLiveRecorder/archive/refs/heads/main.zip && \
-    unzip /tmp/code.zip -d /tmp && \
-    mv /tmp/DouyinLiveRecorder-main /code && \
-    rm -f /code/ffmpeg.exe && \
-    rm /tmp/code.zip
-
-FROM python:3.11-alpine AS final
 WORKDIR /app
-COPY --from=code /code .
 
-RUN apk add --no-cache ffmpeg && \
-    pip install --no-cache-dir -r requirements.txt && \
-    rm -rf /var/cache/apk/* /tmp/* /var/tmp/* /usr/share/man /usr/share/doc /usr/share/licenses && \
-    find /var/log -type f -delete
+# 复制应用程序代码到工作目录
+COPY . /app
 
-CMD ["python3", "main.py"]
+# 更新并安装必要的依赖，同时清理缓存和临时文件
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl gnupg ffmpeg tzdata && \
+    curl -sL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    ln -fs /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
+    dpkg-reconfigure -f noninteractive tzdata && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# 安装 Python 依赖
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 设置启动命令
+CMD ["python", "main.py"]
