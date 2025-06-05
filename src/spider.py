@@ -25,7 +25,7 @@ import urllib.request
 from . import JS_SCRIPT_PATH, utils
 from .utils import trace_error_decorator
 from .logger import script_path
-from .room import get_sec_user_id, get_unique_id
+from .room import get_sec_user_id, get_unique_id, UnsupportedUrlError
 from .http_clients.async_http import async_req
 
 
@@ -113,12 +113,11 @@ async def get_douyin_app_stream_data(url: str, proxy_addr: OptionalStr = None, c
             room_data = json_data['data'][0]
             room_data['anchor_name'] = json_data['user']['nickname']
         else:
-            data = await get_sec_user_id(url, proxy_addr=proxy_addr)
-
-            if data:
+            try:
+                data = await get_sec_user_id(url, proxy_addr=proxy_addr)
                 _room_id, _sec_uid = data
                 room_data = await get_app_data(_room_id, _sec_uid)
-            else:
+            except UnsupportedUrlError:
                 unique_id = await get_unique_id(url, proxy_addr=proxy_addr)
                 return await get_douyin_stream_data(f'https://live.douyin.com/{unique_id}')
 
@@ -684,53 +683,6 @@ async def get_bilibili_stream_data(url: str, qn: str = '10000', platform: str = 
         m3u8_url = host + base_url + extra
         return m3u8_url
 
-
-@trace_error_decorator
-async def get_xhs_stream_url_profile(
-        url: str, proxy_addr: OptionalStr = None, cookies: OptionalStr = None, author: OptionalStr = None
-) -> dict:
-    headers = {
-        'User-Agent': 'ios/7.830 (ios 17.0; ; iPhone 15 (A2846/A3089/A3090/A3092))',
-        'xy-common-params': 'platform=iOS&sid=session.1722166379345546829388',
-        'referer': 'https://app.xhs.cn/',
-    }
-    if cookies:
-        headers['Cookie'] = cookies
-    host_id = get_params(url, 'host_id')
-    user_id = re.search('/user/profile/(.*?)(?=/|\\?|$)', url)
-    user_id = user_id.group(1) if user_id else host_id
-    result = {"anchor_name": '', "is_live": False}
-    if user_id:
-        params = {'user_id_list': user_id}
-        app_api = f'https://live-room.xiaohongshu.com/api/sns/v1/live/user_status?{urllib.parse.urlencode(params)}'
-        json_str = await async_req(app_api, proxy_addr=proxy_addr, headers=headers)
-        json_data = json.loads(json_str)
-        if json_data.get('data'):
-            live_link = json_data['data'][0]['live_link']
-            anchor_name = get_params(live_link, "host_nickname")
-            flv_url = get_params(live_link, "flvUrl")
-            room_id = flv_url.split('live/')[1].split('.')[0]
-            flv_url = f'http://live-source-play.xhscdn.com/live/{room_id}.flv'
-            m3u8_url = flv_url.replace('.flv', '.m3u8')
-            result |= {
-                "anchor_name": anchor_name,
-                "is_live": True,
-                "flv_url": flv_url,
-                "m3u8_url": m3u8_url,
-                'record_url': flv_url
-            }
-        if not result["anchor_name"]:
-            if author:
-                result['anchor_name'] = author
-            else:
-                html_str = await async_req(url, proxy_addr=proxy_addr, headers=headers)
-                json_str = re.search('window.__INITIAL_STATE__=(.*?)</script>', html_str, re.S).group(1)
-                json_data = json.loads(json_str)
-                anchor_name = json_data['profile']['userInfo']['nickname']
-                result['anchor_name'] = anchor_name
-    return result
-
-
 @trace_error_decorator
 async def get_xhs_stream_url(url: str, proxy_addr: OptionalStr = None, cookies: OptionalStr = None) -> dict:
     headers = {
@@ -741,38 +693,49 @@ async def get_xhs_stream_url(url: str, proxy_addr: OptionalStr = None, cookies: 
     if cookies:
         headers['Cookie'] = cookies
 
-    if 'xhslink.com' in url:
+    if "xhslink.com" in url:
         url = await async_req(url, proxy_addr=proxy_addr, headers=headers, redirect_url=True)
 
+    host_id = get_params(url, "host_id")
+    user_id = re.search("/user/profile/(.*?)(?=/|\\?|$)", url)
+    user_id = user_id.group(1) if user_id else host_id
     result = {"anchor_name": '', "is_live": False}
-    room_id = re.search('/livestream/(.*?)(?=/|\\?|$)', url)
-    if room_id:
-        html_str = await async_req(url, proxy_addr=proxy_addr, headers=headers)
-        json_str = re.search('window.__INITIAL_STATE__=(.*?)</script>', html_str, re.S).group(1)
+    html_str = await async_req(url, proxy_addr=proxy_addr, headers=headers)
+    match_data = re.search("<script>window.__INITIAL_STATE__=(.*?)</script>", html_str)
+
+    if match_data:
+        json_str = match_data.group(1).replace("undefined", "null")
         json_data = json.loads(json_str)
-        room_data = json_data['liveStream']['roomData']
-        anchor_name = room_data['hostInfo']['nickName']
-        live_status = json_data['liveStream']['liveStatus']
-        result['anchor_name'] = anchor_name
-        if live_status == 'end':
-            return await get_xhs_stream_url_profile(url, proxy_addr, cookies, anchor_name)
-        title = room_data['roomInfo']['roomTitle']
-        play_data = json.loads(room_data['roomInfo']['pullConfig'])
-        m3u8_url_list = []
-        flv_url_list = []
-        for item in play_data['h264']:
-            play_url = item['master_url']
-            if play_url.endswith('.m3u8'):
-                m3u8_url_list.append(play_url)
-            else:
-                flv_url_list.append(play_url)
-        flv_url = flv_url_list[0]
-        m3u8_url = m3u8_url_list[0]
-        record_url = m3u8_url if m3u8_url else flv_url
-        result |= {'is_live': True, "title": title, "flv_url": flv_url, "m3u8_url": m3u8_url, 'record_url': record_url}
-        return result
-    else:
-        return await get_xhs_stream_url_profile(url, proxy_addr, cookies)
+
+        if json_data.get("liveStream"):
+            stream_data = json_data["liveStream"]
+            if stream_data.get("liveStatus") == "success":
+                room_info = stream_data["roomData"]["roomInfo"]
+                title = room_info.get("roomTitle")
+                if title and "回放" not in title:
+                    live_link = room_info["deeplink"]
+                    anchor_name = get_params(live_link, "host_nickname")
+                    flv_url = get_params(live_link, "flvUrl")
+                    room_id = flv_url.split('live/')[1].split('.')[0]
+                    flv_url = f"http://live-source-play.xhscdn.com/live/{room_id}.flv"
+                    m3u8_url = flv_url.replace('.flv', '.m3u8')
+                    result |= {
+                        "anchor_name": anchor_name,
+                        "is_live": True,
+                        "title": title,
+                        "flv_url": flv_url,
+                        "m3u8_url": m3u8_url,
+                        'record_url': flv_url
+                    }
+                    return result
+
+    profile_url = f"https://www.xiaohongshu.com/user/profile/{user_id}"
+    html_str = await async_req(profile_url, proxy_addr=proxy_addr, headers=headers)
+    anchor_name = re.search("<title>@(.*?) 的个人主页</title>", html_str)
+    if anchor_name:
+        result["anchor_name"] = anchor_name.group(1)
+
+    return result
 
 
 @trace_error_decorator
@@ -1652,7 +1615,7 @@ async def get_popkontv_stream_url(
                 'signId': username,
                 'version': '4.6.2',
             }
-            play_api = 'https://www.popkontv.com/api/proxy/broadcast/v1/castwatchonoff'
+            play_api = 'https://www.popkontv.com/api/proxy/broadcast/v1/castwatchonoffguest'
             return await async_req(play_api, proxy_addr=proxy_addr, json_data=data, headers=header, abroad=True)
 
         json_str = await fetch_data(headers, partner_code)
@@ -2923,7 +2886,7 @@ async def get_taobao_stream_url(url: str, proxy_addr: OptionalStr = None, cookie
         params |= {'sign': sign, 't': t13}
         api = f'https://h5api.m.taobao.com/h5/mtop.mediaplatform.live.livedetail/4.0/?{urllib.parse.urlencode(params)}'
         jsonp_str, new_cookie = await async_req(url=api, proxy_addr=proxy_addr, headers=headers, timeout=20,
-                                                include_cookies=True)
+                                                return_cookies=True, include_cookies=True)
         json_data = utils.jsonp_to_json(jsonp_str)
 
         ret_msg = json_data['ret']
@@ -2934,8 +2897,18 @@ async def get_taobao_stream_url(url: str, proxy_addr: OptionalStr = None, cookie
             if live_status == '1':
                 live_title = json_data['data']['title']
                 play_url_list = json_data['data']['liveUrlList']
-                play_url_list = sorted(play_url_list, key=lambda x: int(x['codeLevel']), reverse=True)
+
+                def get_sort_key(item):
+                    definition_priority = {
+                        "lld": 0, "ld": 1, "md": 2, "hd": 3, "ud": 4
+                    }
+                    def_value = item.get('definition') or item.get('newDefinition')
+                    priority = definition_priority.get(def_value, -1)
+                    return priority
+
+                play_url_list = sorted(play_url_list, key=get_sort_key, reverse=True)
                 result |= {"is_live": True, "title": live_title, "play_url_list": play_url_list, 'live_id': live_id}
+
             return result
         else:
             print(f'Error: Taobao live data fetch failed, {ret_msg[0]}')
